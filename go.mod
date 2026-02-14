@@ -1,4 +1,4 @@
-module helm-health
+module github.com/amankr1098/helm-health
 
 go 1.21
 
