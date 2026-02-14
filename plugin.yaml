@@ -1,0 +1,8 @@
+name: "health"
+version: "0.1.0"
+usage: "Health checking plugin for Helm"
+description: "A plugin that provides health checking capabilities for deployed applications"
+command: "$HELM_PLUGIN_DIR/helm-health"
+hooks:
+  install: "cd $HELM_PLUGIN_DIR; go build -o helm-health main.go"
+  update: "cd $HELM_PLUGIN_DIR; go build -o helm-health main.go"
