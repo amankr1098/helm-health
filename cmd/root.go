@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/amankr1098/helm-health/internal/output"
 	rel "github.com/amankr1098/helm-health/internal/release"
 	"github.com/spf13/cobra"
 )
@@ -36,7 +37,8 @@ and provide insights into their status.`,
 			namespace = namespaceFlag.Value.String()
 		}
 		fmt.Printf("Release Name: %s, Namespace: %s\n", releaseName, namespace)
-		rel.FetchHelmRelease(releaseName, namespace)
+		outputText := output.NewOutputText(releaseName, namespace)
+		rel.FetchHelmRelease(releaseName, namespace, outputText)
 	},
 }
 
