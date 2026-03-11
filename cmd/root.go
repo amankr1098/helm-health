@@ -4,7 +4,6 @@ Copyright © 2026 NAME HERE <EMAIL ADDRESS>
 package cmd
 
 import (
-	"fmt"
 	"os"
 
 	"github.com/amankr1098/helm-health/internal/output"
@@ -36,9 +35,13 @@ and provide insights into their status.`,
 			namespaceFlag := cmd.Flag("namespace")
 			namespace = namespaceFlag.Value.String()
 		}
-		fmt.Printf("Release Name: %s, Namespace: %s\n", releaseName, namespace)
-		outputText := output.NewOutputText(releaseName, namespace)
-		rel.FetchHelmRelease(releaseName, namespace, outputText)
+		outputFlag := cmd.Flag("output")
+		format := output.FormatText
+		if outputFlag.Value.String() == "json" {
+			format = output.FormatJSON
+		}
+
+		rel.FetchHelmRelease(releaseName, namespace, format)
 	},
 }
 
@@ -64,4 +67,5 @@ func init() {
 
 	rootCmd.Flags().StringP("release_name", "r", "", "Name of the Helm release to check")
 	rootCmd.Flags().StringP("namespace", "n", "default", "Namespace of the Helm release")
+	rootCmd.Flags().StringP("output", "o", "text", "Output format: text or json")
 }

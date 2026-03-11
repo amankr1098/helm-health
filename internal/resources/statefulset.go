@@ -5,39 +5,48 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/amankr1098/helm-health/internal/data"
-	appsv1 "k8s.io/api/apps/v1"
+	"github.com/amankr1098/helm-health/internal/output"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
 )
 
-func FetchStatefulSet(clientset *kubernetes.Clientset, namespace string, statefulSetName string) data.StatefulSetStatus {
-
+func FetchStatefulSet(clientset *kubernetes.Clientset, namespace string, statefulSetName string) output.Resource {
 	statefulSet, err := clientset.AppsV1().StatefulSets(namespace).Get(context.TODO(), statefulSetName, v1.GetOptions{})
 	if err != nil {
-		fmt.Printf("Failed to fetch StatefulSet %q in namespace %q: %v\n", statefulSetName, namespace, err)
-		os.Exit(1)
-	}
-	return parseStatefulSet(statefulSet)
-}
-
-func parseStatefulSet(statefulSet *appsv1.StatefulSet) data.StatefulSetStatus {
-	resourceStatus := data.StatefulSetStatus{
-		Name: statefulSet.Name,
-		Kind: "StatefulSet",
+		fmt.Fprintf(os.Stderr, "failed to fetch StatefulSet %q in namespace %q: %v\n", statefulSetName, namespace, err)
+		r := output.NewResource("StatefulSet", statefulSetName, namespace)
+		r.SetStatus(output.StatusUnknown)
+		r.AddIssue(fmt.Sprintf("- failed to fetch: %v", err))
+		return *r
 	}
 
-	resourceStatus.CurrentReplicas = statefulSet.Status.CurrentReplicas
-	resourceStatus.DesiredReplicas = statefulSet.Status.Replicas
-	resourceStatus.ReadyReplicas = statefulSet.Status.ReadyReplicas
-	resourceStatus.UpdatedReplicas = statefulSet.Status.UpdatedReplicas
+	r := output.NewResource("StatefulSet", statefulSet.Name, statefulSet.Namespace)
 
-	if resourceStatus.ReadyReplicas == resourceStatus.DesiredReplicas {
-		resourceStatus.Healthy = true
+	desired := statefulSet.Status.Replicas
+	ready := statefulSet.Status.ReadyReplicas
+	current := statefulSet.Status.CurrentReplicas
+	updated := statefulSet.Status.UpdatedReplicas
+
+	r.SetHealth("replicas", map[string]any{
+		"desired": desired,
+		"ready":   ready,
+		"current": current,
+		"updated": updated,
+	})
+
+	if ready >= desired && desired > 0 {
+		r.SetStatus(output.StatusHealthy)
+		r.SetMessage(fmt.Sprintf("%d/%d replicas ready", ready, desired))
+		r.SetHealth("ready", true)
+	} else if desired == 0 {
+		r.SetStatus(output.StatusHealthy)
+		r.SetMessage("scaled to 0")
+		r.SetHealth("ready", true)
 	} else {
-		resourceStatus.Healthy = false
+		r.SetStatus(output.StatusUnhealthy)
+		r.SetHealth("ready", false)
+		r.AddIssue(fmt.Sprintf("- %d/%d replicas ready", ready, desired))
 	}
 
-	return resourceStatus
-
+	return *r
 }

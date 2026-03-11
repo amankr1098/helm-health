@@ -5,32 +5,51 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/amankr1098/helm-health/internal/data"
-	appsv1 "k8s.io/api/apps/v1"
+	"github.com/amankr1098/helm-health/internal/output"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
 )
 
-func FetchDaemonSet(clientset *kubernetes.Clientset, namespace string, daemonSetName string) data.DaemonSetStatus {
-
+func FetchDaemonSet(clientset *kubernetes.Clientset, namespace string, daemonSetName string) output.Resource {
 	daemonSet, err := clientset.AppsV1().DaemonSets(namespace).Get(context.TODO(), daemonSetName, v1.GetOptions{})
 	if err != nil {
-		fmt.Printf("%+v", err)
-		os.Exit(1)
+		fmt.Fprintf(os.Stderr, "failed to fetch DaemonSet %q in namespace %q: %v\n", daemonSetName, namespace, err)
+		r := output.NewResource("DaemonSet", daemonSetName, namespace)
+		r.SetStatus(output.StatusUnknown)
+		r.AddIssue(fmt.Sprintf("- failed to fetch: %v", err))
+		return *r
 	}
-	return parseDaemonSet(daemonSet)
-}
 
-func parseDaemonSet(daemonSet *appsv1.DaemonSet) data.DaemonSetStatus {
-	resourceStatus := data.DaemonSetStatus{
-		Name: daemonSet.Name,
-		Kind: "DaemonSet",
+	r := output.NewResource("DaemonSet", daemonSet.Name, daemonSet.Namespace)
+
+	desired := daemonSet.Status.DesiredNumberScheduled
+	ready := daemonSet.Status.NumberReady
+	available := daemonSet.Status.NumberAvailable
+	misscheduled := daemonSet.Status.NumberMisscheduled
+
+	r.SetHealth("replicas", map[string]any{
+		"desired":      desired,
+		"ready":        ready,
+		"available":    available,
+		"misscheduled": misscheduled,
+	})
+
+	if ready >= desired && desired > 0 {
+		r.SetStatus(output.StatusHealthy)
+		r.SetMessage(fmt.Sprintf("%d/%d nodes ready", ready, desired))
+		r.SetHealth("ready", true)
+	} else if desired == 0 {
+		r.SetStatus(output.StatusHealthy)
+		r.SetMessage("no nodes scheduled")
+		r.SetHealth("ready", true)
+	} else {
+		r.SetStatus(output.StatusUnhealthy)
+		r.SetHealth("ready", false)
+		r.AddIssue(fmt.Sprintf("- %d/%d nodes ready", ready, desired))
+		if misscheduled > 0 {
+			r.AddIssue(fmt.Sprintf("- %d nodes misscheduled", misscheduled))
+		}
 	}
-	resourceStatus.DesiredNumber = daemonSet.Status.DesiredNumberScheduled
-	resourceStatus.AvailableNumber = daemonSet.Status.NumberAvailable
-	resourceStatus.ReadyNumber = daemonSet.Status.NumberReady
-	if resourceStatus.ReadyNumber == resourceStatus.DesiredNumber {
-		resourceStatus.Healthy = true
-	}
-	return resourceStatus
+
+	return *r
 }

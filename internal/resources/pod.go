@@ -5,44 +5,55 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/amankr1098/helm-health/internal/data"
+	"github.com/amankr1098/helm-health/internal/output"
 	corev1 "k8s.io/api/core/v1"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
 )
 
-func FetchPod(clientset *kubernetes.Clientset, namespace string, podName string) data.PodStatus {
-
+func FetchPod(clientset *kubernetes.Clientset, namespace string, podName string) output.Resource {
 	pod, err := clientset.CoreV1().Pods(namespace).Get(context.TODO(), podName, v1.GetOptions{})
 	if err != nil {
-		fmt.Printf("%+v", err)
-		os.Exit(1)
+		fmt.Fprintf(os.Stderr, "failed to fetch Pod %q in namespace %q: %v\n", podName, namespace, err)
+		r := output.NewResource("Pod", podName, namespace)
+		r.SetStatus(output.StatusUnknown)
+		r.AddIssue(fmt.Sprintf("- failed to fetch: %v", err))
+		return *r
 	}
-
 	return parsePod(pod)
 }
 
-func parsePod(pod *corev1.Pod) data.PodStatus {
-	resourceStatus := data.PodStatus{
-		Name: pod.Name,
-		Kind: "Pod",
-	}
-	resourceStatus.Phase = string(pod.Status.Phase)
+func parsePod(pod *corev1.Pod) output.Resource {
+	r := output.NewResource("Pod", pod.Name, pod.Namespace)
+
+	podHealth := BuildPodHealthMap(pod)
+	r.SetHealth("phase", podHealth["phase"])
+	r.SetHealth("containers", podHealth["containers"])
+
 	allReady := true
-	for _, containerStatus := range pod.Status.ContainerStatuses {
-		if !containerStatus.Ready {
+	for _, cs := range pod.Status.ContainerStatuses {
+		if !cs.Ready {
 			allReady = false
 			break
 		}
 	}
 
-	resourceStatus.Ready = allReady
-	resourceStatus.Containers = len(pod.Spec.Containers)
 	if allReady && pod.Status.Phase == corev1.PodRunning {
-		resourceStatus.Healthy = true
+		r.SetStatus(output.StatusHealthy)
+		r.SetMessage(fmt.Sprintf("%d/%d containers ready", len(pod.Status.ContainerStatuses), len(pod.Spec.Containers)))
+		r.SetHealth("ready", true)
+	} else if pod.Status.Phase == corev1.PodSucceeded {
+		r.SetStatus(output.StatusHealthy)
+		r.SetMessage("Completed")
+		r.SetHealth("ready", true)
 	} else {
-		resourceStatus.Healthy = false
+		r.SetStatus(output.StatusUnhealthy)
+		r.SetHealth("ready", false)
+		r.AddIssue(fmt.Sprintf("- Phase: %s", pod.Status.Phase))
+		for _, line := range PodIssueLines(pod) {
+			r.AddIssue(line)
+		}
 	}
 
-	return resourceStatus
+	return *r
 }
