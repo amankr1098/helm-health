@@ -204,12 +204,9 @@ helm-health/
 
 ## Contributing
 
-Contributions are welcome! Here's how to get started:
+Contributions are welcome! Please read our [Contributing Guide](CONTRIBUTING.md) to get started.
 
-1. **Fork** the repository.
-2. **Create a branch** for your feature or fix: `git checkout -b feat/my-feature`.
-3. **Make your changes** and ensure they build: `go build ./...`.
-4. **Submit a pull request** with a clear description of the change.
+**TL;DR:** Fork → branch → make changes → open a PR. Only maintainers can merge.
 
 ### Ideas for contributions
 

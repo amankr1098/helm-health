@@ -1,0 +1,5 @@
+# Code Owners for Helm Health
+# These users will be automatically requested for review on PRs.
+# Only code owners / maintainers can approve and merge PRs.
+
+* @amankr1098
