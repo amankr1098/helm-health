@@ -1,207 +1,158 @@
-# Kubernetes Resource Health Rules
+# Health Rules
 
-This document defines the rules used to determine the health status of Kubernetes resources.
+This document defines how **helm-health** determines the health of each Kubernetes resource in a Helm release.
+
+Every resource is assigned one of three statuses:
+
+| Status | Icon | Meaning |
+|--------|------|---------|
+| **Healthy** | ✅ | Resource is operating as expected |
+| **Unhealthy** | ❌ | Resource has a problem that needs attention |
+| **Unknown** | ❓ | Status could not be determined (API fetch error) |
+
+If a resource kind has no dedicated rules (ConfigMap, Secret, ServiceAccount, RBAC resources, etc.), it is reported as **Healthy** as long as it exists in the release manifest.
 
 ---
 
 ## Deployment
 
-| Condition | Status |
+| Condition | Result |
 |-----------|--------|
-| `ReadyReplicas == DesiredReplicas` AND `AvailableReplicas == DesiredReplicas` | ✅ Healthy |
-| `ReadyReplicas < DesiredReplicas` | ⚠️ Degraded |
-| `AvailableReplicas == 0` AND `DesiredReplicas > 0` | ❌ Unhealthy |
-| `UpdatedReplicas < DesiredReplicas` | 🔄 Updating |
-| Condition `Progressing` is `False` with reason `ProgressDeadlineExceeded` | ❌ Failed |
+| `ReadyReplicas >= DesiredReplicas` and `DesiredReplicas > 0` | ✅ Healthy — *"3/3 replicas ready"* |
+| `DesiredReplicas == 0` (scaled to zero) | ✅ Healthy — *"scaled to 0"* |
+| `ReadyReplicas < DesiredReplicas` | ❌ Unhealthy — reports available vs desired count |
+| Unable to fetch Deployment from API | ❓ Unknown |
 
----
+**Pod diagnostics:** When a Deployment is unhealthy, the plugin fetches the Deployment's pods and inspects each container. Reported details include:
 
-## Pod
-
-| Condition | Status |
-|-----------|--------|
-| `Phase == Running` AND all containers `Ready == true` | ✅ Healthy |
-| `Phase == Succeeded` | ✅ Completed |
-| `Phase == Pending` | ⏳ Pending |
-| `Phase == Failed` | ❌ Failed |
-| `Phase == Unknown` | ❓ Unknown |
-| Any container `RestartCount > threshold` (e.g., 5) | ⚠️ CrashLooping |
-| Container state `Waiting` with reason `CrashLoopBackOff` | ❌ CrashLooping |
-| Container state `Waiting` with reason `ImagePullBackOff` | ❌ ImagePullError |
-| Container state `Waiting` with reason `ErrImagePull` | ❌ ImagePullError |
+- Container waiting state and reason (`CrashLoopBackOff`, `ImagePullBackOff`, etc.)
+- Container terminated state, exit code, and reason
+- Time since last restart
 
 ---
 
 ## StatefulSet
 
-| Condition | Status |
+| Condition | Result |
 |-----------|--------|
-| `ReadyReplicas == DesiredReplicas` | ✅ Healthy |
-| `ReadyReplicas < DesiredReplicas` | ⚠️ Degraded |
-| `CurrentReplicas != UpdatedReplicas` | 🔄 Updating |
-| `ReadyReplicas == 0` AND `DesiredReplicas > 0` | ❌ Unhealthy |
+| `ReadyReplicas >= DesiredReplicas` and `DesiredReplicas > 0` | ✅ Healthy — *"2/2 replicas ready"* |
+| `DesiredReplicas == 0` (scaled to zero) | ✅ Healthy — *"scaled to 0"* |
+| `ReadyReplicas < DesiredReplicas` | ❌ Unhealthy — reports ready vs desired count |
+| Unable to fetch StatefulSet from API | ❓ Unknown |
+
+Health data includes `desired`, `ready`, `current`, and `updated` replica counts.
 
 ---
 
 ## DaemonSet
 
-| Condition | Status |
+| Condition | Result |
 |-----------|--------|
-| `NumberReady == DesiredNumberScheduled` | ✅ Healthy |
-| `NumberReady < DesiredNumberScheduled` | ⚠️ Degraded |
-| `NumberMisscheduled > 0` | ⚠️ Misscheduled |
-| `NumberUnavailable > 0` | ⚠️ Unavailable |
-| `NumberReady == 0` AND `DesiredNumberScheduled > 0` | ❌ Unhealthy |
+| `NumberReady >= DesiredNumberScheduled` and `DesiredNumberScheduled > 0` | ✅ Healthy — *"5/5 nodes ready"* |
+| `DesiredNumberScheduled == 0` | ✅ Healthy — *"no nodes scheduled"* |
+| `NumberReady < DesiredNumberScheduled` | ❌ Unhealthy — reports ready vs desired count |
+| `NumberMisscheduled > 0` (while unhealthy) | ❌ Unhealthy — additionally reports misscheduled node count |
+| Unable to fetch DaemonSet from API | ❓ Unknown |
+
+Health data includes `desired`, `ready`, `available`, and `misscheduled` counts.
 
 ---
 
-## ReplicaSet
+## Pod
 
-| Condition | Status |
+| Condition | Result |
 |-----------|--------|
-| `ReadyReplicas == DesiredReplicas` | ✅ Healthy |
-| `ReadyReplicas < DesiredReplicas` | ⚠️ Degraded |
-| `ReadyReplicas == 0` AND `DesiredReplicas > 0` | ❌ Unhealthy |
+| `Phase == Running` AND all containers `Ready == true` | ✅ Healthy — *"3/3 containers ready"* |
+| `Phase == Succeeded` | ✅ Healthy — *"Completed"* |
+| Any other phase (`Pending`, `Failed`, `Unknown`) or any container not ready | ❌ Unhealthy — reports phase and container issues |
+| Unable to fetch Pod from API | ❓ Unknown |
+
+**Container-level issues reported:**
+
+- Container in `Waiting` state → reports reason (e.g. `CrashLoopBackOff`, `ImagePullBackOff`) and message
+- Container in `Terminated` state with non-zero exit code → reports reason, message, and exit code
+- Time since last restart (if last termination state exists)
 
 ---
 
 ## Job
 
-| Condition | Status |
+| Condition | Result |
 |-----------|--------|
-| `Succeeded >= Completions` | ✅ Completed |
-| `Active > 0` AND `Failed == 0` | 🔄 Running |
-| `Failed > 0` AND `Active > 0` | ⚠️ PartiallyFailed |
-| `Failed > BackoffLimit` | ❌ Failed |
-| Condition `Complete` is `True` | ✅ Completed |
-| Condition `Failed` is `True` | ❌ Failed |
+| `Succeeded >= Completions` | ✅ Healthy — *"1/1 completed"* |
+| `Active > 0` AND `Failed == 0` (still running) | ✅ Healthy — *"1 active, 0/1 completed"* |
+| `Failed > 0` | ❌ Unhealthy — reports failed, succeeded, and desired counts |
+| No succeeded, active, or failed pods | ❓ Unknown |
+| Unable to fetch Job from API | ❓ Unknown |
 
----
-
-## CronJob
-
-| Condition | Status |
-|-----------|--------|
-| `LastSuccessfulTime` exists AND recent | ✅ Healthy |
-| `LastScheduleTime` exists AND no active jobs failing | ✅ Healthy |
-| Active jobs count > `ConcurrencyPolicy` limit (if applicable) | ⚠️ Backlog |
-| `LastSuccessfulTime` is stale (older than 2x schedule interval) | ⚠️ Stale |
-| No `LastScheduleTime` AND should have run | ❌ NotScheduled |
+Health data includes `desired` completions, `succeeded`, `failed`, and `active` counts.
 
 ---
 
 ## Service
 
-| Condition | Status |
+| Condition | Result |
 |-----------|--------|
-| Has matching Endpoints with `Ready` addresses | ✅ Healthy |
-| Has Endpoints but all are `NotReady` | ⚠️ NoReadyEndpoints |
-| No matching Endpoints found | ❌ NoEndpoints |
-| Type `LoadBalancer` AND `Ingress` IP/Hostname assigned | ✅ Healthy |
-| Type `LoadBalancer` AND no `Ingress` assigned | ⏳ Pending |
+| Ready endpoints exist (and LB assigned if type is `LoadBalancer`) | ✅ Healthy — *"3 endpoints"* or *"3 endpoints, LoadBalancer ready"* |
+| Type `LoadBalancer` but no ingress IP/hostname assigned | ❌ Unhealthy — *"LoadBalancer ingress not yet assigned"* |
+| No ready endpoints and service is not `ExternalName` or headless (`ClusterIP: None`) | ❌ Unhealthy — *"No endpoints available"* |
+| `ReadyEndpoints < TotalEndpoints` | ❌ Unhealthy — *"Only 2 of 3 expected endpoints available"* |
+| Unable to fetch Service or Endpoints from API | ❓ Unknown |
+
+Health data includes service `type`, `clusterIP`, and endpoint counts (`ready`, `notReady`, `total`).
+
+> **Note:** `ExternalName` services and headless services (`ClusterIP: None`) with no endpoints are not flagged as unhealthy.
 
 ---
 
 ## PersistentVolumeClaim (PVC)
 
-| Condition | Status |
+| Condition | Result |
 |-----------|--------|
-| `Phase == Bound` | ✅ Healthy |
-| `Phase == Pending` | ⏳ Pending |
-| `Phase == Lost` | ❌ Lost |
-
----
-
-## PersistentVolume (PV)
-
-| Condition | Status |
-|-----------|--------|
-| `Phase == Bound` | ✅ Healthy |
-| `Phase == Available` | ✅ Available |
-| `Phase == Released` | ⚠️ Released |
-| `Phase == Failed` | ❌ Failed |
+| `Phase == Bound` | ✅ Healthy — *"Bound"* |
+| Any other phase (`Pending`, `Lost`, etc.) | ❌ Unhealthy — reports current phase |
+| Unable to fetch PVC from API | ❓ Unknown |
 
 ---
 
 ## Ingress
 
-| Condition | Status |
+| Condition | Result |
 |-----------|--------|
-| All backend services have ready endpoints | ✅ Healthy |
-| LoadBalancer `Ingress` IP/Hostname assigned | ✅ Configured |
-| Some backend services have no ready endpoints | ⚠️ PartiallyHealthy |
-| No LoadBalancer `Ingress` assigned | ⏳ Pending |
-| No ready endpoints on any backend | ❌ Unhealthy |
+| LoadBalancer IP/hostname assigned AND all backend services have ready endpoints | ✅ Healthy — *"3/3 backends ready, LB assigned"* |
+| Some backends healthy but not all | ❌ Unhealthy — *"2/3 backends ready"* |
+| No LoadBalancer ingress assigned | ❌ Unhealthy — *"No LoadBalancer ingress IP/hostname assigned"* |
+| Backend service has no ready endpoints | ❌ Unhealthy — reports which backend has no endpoints |
+| Backend service endpoints could not be fetched | ❌ Unhealthy — reports which backend failed |
+| Unable to fetch Ingress from API | ❓ Unknown |
+
+Health data includes LoadBalancer details, ingress class, TLS hosts, and per-backend status (service name, host, path, ready endpoint count).
+
+> **Note:** Both rule-based backends and the default backend (if configured) are checked.
 
 ---
 
 ## NetworkPolicy
 
-| Condition | Status |
+| Condition | Result |
 |-----------|--------|
-| Policy exists and matches at least one pod | ✅ Healthy |
-| Policy exists but no pods match the selector | ⚠️ NoMatchingPods |
-| Failed to fetch policy | ❓ Unknown |
+| Policy exists and at least one pod matches the pod selector | ✅ Healthy — *"5 matching pods, types: [Ingress Egress]"* |
+| Policy exists but zero pods match the pod selector | ❌ Unhealthy — *"no matching pods"* |
+| Unable to fetch NetworkPolicy from API | ❓ Unknown |
 
----
-
-## HorizontalPodAutoscaler (HPA)
-
-| Condition | Status |
-|-----------|--------|
-| `CurrentReplicas == DesiredReplicas` | ✅ Stable |
-| `CurrentReplicas < DesiredReplicas` | 🔼 ScalingUp |
-| `CurrentReplicas > DesiredReplicas` | 🔽 ScalingDown |
-| Condition `ScalingActive` is `False` | ⚠️ ScalingDisabled |
-| Condition `AbleToScale` is `False` | ❌ Unable |
-
----
-
-## Node
-
-| Condition | Status |
-|-----------|--------|
-| Condition `Ready` is `True` | ✅ Healthy |
-| Condition `Ready` is `False` | ❌ NotReady |
-| Condition `Ready` is `Unknown` | ❓ Unknown |
-| Condition `MemoryPressure` is `True` | ⚠️ MemoryPressure |
-| Condition `DiskPressure` is `True` | ⚠️ DiskPressure |
-| Condition `PIDPressure` is `True` | ⚠️ PIDPressure |
-| Condition `NetworkUnavailable` is `True` | ❌ NetworkUnavailable |
-
----
-
-## Health Status Definitions
-
-| Status | Icon | Meaning |
-|--------|------|---------|
-| **Healthy** | ✅ | Resource is fully operational |
-| **Degraded** | ⚠️ | Resource is partially working |
-| **Unhealthy** | ❌ | Resource has failed |
-| **Pending** | ⏳ | Resource is waiting |
-| **Updating** | 🔄 | Resource is being updated |
-| **Completed** | ✅ | Job/Task finished successfully |
-| **Failed** | ❌ | Job/Task failed |
-| **Unknown** | ❓ | Status cannot be determined |
+Health data includes the pod selector, matching pod count, policy types, and parsed ingress/egress rules (ports, pod/namespace selectors, IP blocks).
 
 ---
 
 ## Aggregated Release Health
 
-For a Helm release containing multiple resources:
+The overall release status is derived from all individual resource statuses:
 
 | Condition | Overall Status |
 |-----------|----------------|
-| All resources are Healthy/Completed | ✅ Healthy |
-| Any resource is Unhealthy/Failed | ❌ Unhealthy |
-| Any resource is Degraded (but none Failed) | ⚠️ Degraded |
-| Any resource is Pending/Updating (but none Failed/Degraded) | 🔄 Progressing |
+| All resources are Healthy | ✅ Healthy |
+| Any resource is Unhealthy | ❌ Unhealthy |
 
----
+When the overall status is **Unhealthy**, `helm-health` exits with a non-zero exit code.
 
-## Notes
-
-1. **Thresholds are configurable** - Restart count thresholds, staleness intervals, etc. should be configurable.
-2. **Events matter** - Recent warning events can indicate issues not visible in status.
-3. **Age matters** - A Pending pod for 1 minute is normal; Pending for 30 minutes is a problem.
-4. **Context matters** - A Job with Failed pods might still be healthy if retries are expected.
+> **Note:** If the Helm release status itself is not `deployed`, the release is immediately reported as **Unhealthy** without checking individual resources.
