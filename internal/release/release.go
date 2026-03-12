@@ -103,6 +103,10 @@ func processManifest(manifest string, namespace string) []output.Resource {
 				results = append(results, res.FetchPVC(clientset, namespace, name))
 			case "Job":
 				results = append(results, res.FetchJob(clientset, namespace, name))
+			case "Ingress":
+				results = append(results, res.FetchIngress(clientset, namespace, name))
+			case "NetworkPolicy":
+				results = append(results, res.FetchNetworkPolicy(clientset, namespace, name))
 			default:
 				// Resources without specific health checks (ConfigMap, Secret, etc.)
 				nr := output.NewResource(kind, name, namespace)

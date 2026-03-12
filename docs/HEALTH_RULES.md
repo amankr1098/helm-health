@@ -131,6 +131,17 @@ This document defines the rules used to determine the health status of Kubernete
 | LoadBalancer `Ingress` IP/Hostname assigned | ✅ Configured |
 | Some backend services have no ready endpoints | ⚠️ PartiallyHealthy |
 | No LoadBalancer `Ingress` assigned | ⏳ Pending |
+| No ready endpoints on any backend | ❌ Unhealthy |
+
+---
+
+## NetworkPolicy
+
+| Condition | Status |
+|-----------|--------|
+| Policy exists and matches at least one pod | ✅ Healthy |
+| Policy exists but no pods match the selector | ⚠️ NoMatchingPods |
+| Failed to fetch policy | ❓ Unknown |
 
 ---
 
