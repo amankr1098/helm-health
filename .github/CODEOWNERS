@@ -3,3 +3,6 @@
 # Only code owners / maintainers can approve and merge PRs.
 
 * @amankr1098
+
+# License file — only the maintainer can modify
+LICENSE @amankr1098
