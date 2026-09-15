@@ -12,7 +12,9 @@ import (
 )
 
 func FetchNetworkPolicy(clientset *kubernetes.Clientset, namespace string, policyName string) output.Resource {
-	policy, err := clientset.NetworkingV1().NetworkPolicies(namespace).Get(context.TODO(), policyName, v1.GetOptions{})
+	ctx, cancel := RequestContext()
+	defer cancel()
+	policy, err := clientset.NetworkingV1().NetworkPolicies(namespace).Get(ctx, policyName, v1.GetOptions{})
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "failed to fetch NetworkPolicy %q in namespace %q: %v\n", policyName, namespace, err)
 		r := output.NewResource("NetworkPolicy", policyName, namespace)
@@ -21,10 +23,10 @@ func FetchNetworkPolicy(clientset *kubernetes.Clientset, namespace string, polic
 		return *r
 	}
 
-	return parseNetworkPolicy(clientset, policy)
+	return parseNetworkPolicy(ctx, clientset, policy)
 }
 
-func parseNetworkPolicy(clientset *kubernetes.Clientset, policy *networkingv1.NetworkPolicy) output.Resource {
+func parseNetworkPolicy(ctx context.Context, clientset *kubernetes.Clientset, policy *networkingv1.NetworkPolicy) output.Resource {
 	r := output.NewResource("NetworkPolicy", policy.Name, policy.Namespace)
 
 	healthy := true
@@ -34,7 +36,7 @@ func parseNetworkPolicy(clientset *kubernetes.Clientset, policy *networkingv1.Ne
 	r.SetHealth("podSelector", selector)
 
 	// Count matching pods
-	pods, err := clientset.CoreV1().Pods(policy.Namespace).List(context.TODO(), v1.ListOptions{
+	pods, err := clientset.CoreV1().Pods(policy.Namespace).List(ctx, v1.ListOptions{
 		LabelSelector: selector,
 	})
 	matchingPods := 0

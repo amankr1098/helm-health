@@ -19,6 +19,7 @@ const (
 	StatusHealthy   = "Healthy"
 	StatusUnhealthy = "Unhealthy"
 	StatusUnknown   = "Unknown"
+	StatusNotFound  = "NotFound"
 )
 
 // Resource represents a single Kubernetes resource's health status.
@@ -45,6 +46,7 @@ type OutputResult struct {
 	Release   string     `json:"release"`
 	Namespace string     `json:"namespace"`
 	Status    string     `json:"status"`
+	Message   string     `json:"message,omitempty"`
 	Timestamp time.Time  `json:"timestamp"`
 	Duration  string     `json:"duration"`
 	Summary   Summary    `json:"summary"`
@@ -141,13 +143,28 @@ func (o *OutputResult) Print(format OutputFormat) {
 
 func (o *OutputResult) printText() {
 	statusColor := ColorGreen
-	if o.Status != StatusHealthy {
+	switch o.Status {
+	case StatusHealthy:
+		statusColor = ColorGreen
+	case StatusNotFound, StatusUnknown:
+		statusColor = ColorYellow
+	default:
 		statusColor = ColorRed
 	}
 
 	fmt.Printf("\nRELEASE: %s\n", o.Release)
 	fmt.Printf("STATUS: %s%s%s\n", statusColor, o.Status, ColorReset)
 	fmt.Printf("NAMESPACE: %s\n", o.Namespace)
+	if o.Message != "" {
+		fmt.Printf("MESSAGE: %s\n", o.Message)
+	}
+
+	// A not-found release has no resources to report.
+	if o.Status == StatusNotFound {
+		fmt.Println()
+		return
+	}
+
 	fmt.Println()
 	fmt.Println("RESOURCES:")
 

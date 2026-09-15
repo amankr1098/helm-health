@@ -1,7 +1,6 @@
 package resources
 
 import (
-	"context"
 	"fmt"
 	"os"
 
@@ -12,7 +11,9 @@ import (
 )
 
 func FetchPod(clientset *kubernetes.Clientset, namespace string, podName string) output.Resource {
-	pod, err := clientset.CoreV1().Pods(namespace).Get(context.TODO(), podName, v1.GetOptions{})
+	ctx, cancel := RequestContext()
+	defer cancel()
+	pod, err := clientset.CoreV1().Pods(namespace).Get(ctx, podName, v1.GetOptions{})
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "failed to fetch Pod %q in namespace %q: %v\n", podName, namespace, err)
 		r := output.NewResource("Pod", podName, namespace)

@@ -41,7 +41,20 @@ and provide insights into their status.`,
 			format = output.FormatJSON
 		}
 
-		rel.FetchHelmRelease(releaseName, namespace, format)
+		result, err := rel.FetchHelmRelease(releaseName, namespace)
+		if err != nil {
+			cmd.PrintErrln("Error:", err)
+			os.Exit(1)
+		}
+
+		result.Print(format)
+
+		switch result.Status {
+		case output.StatusNotFound:
+			os.Exit(2)
+		case output.StatusUnhealthy:
+			os.Exit(1)
+		}
 	},
 }
 

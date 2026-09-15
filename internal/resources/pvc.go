@@ -1,7 +1,6 @@
 package resources
 
 import (
-	"context"
 	"fmt"
 	"os"
 
@@ -11,7 +10,9 @@ import (
 )
 
 func FetchPVC(clientset *kubernetes.Clientset, namespace string, pvcName string) output.Resource {
-	pvc, err := clientset.CoreV1().PersistentVolumeClaims(namespace).Get(context.TODO(), pvcName, v1.GetOptions{})
+	ctx, cancel := RequestContext()
+	defer cancel()
+	pvc, err := clientset.CoreV1().PersistentVolumeClaims(namespace).Get(ctx, pvcName, v1.GetOptions{})
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "failed to fetch PVC %q in namespace %q: %v\n", pvcName, namespace, err)
 		r := output.NewResource("PersistentVolumeClaim", pvcName, namespace)

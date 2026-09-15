@@ -1,7 +1,6 @@
 package resources
 
 import (
-	"context"
 	"fmt"
 	"os"
 
@@ -11,7 +10,9 @@ import (
 )
 
 func FetchDaemonSet(clientset *kubernetes.Clientset, namespace string, daemonSetName string) output.Resource {
-	daemonSet, err := clientset.AppsV1().DaemonSets(namespace).Get(context.TODO(), daemonSetName, v1.GetOptions{})
+	ctx, cancel := RequestContext()
+	defer cancel()
+	daemonSet, err := clientset.AppsV1().DaemonSets(namespace).Get(ctx, daemonSetName, v1.GetOptions{})
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "failed to fetch DaemonSet %q in namespace %q: %v\n", daemonSetName, namespace, err)
 		r := output.NewResource("DaemonSet", daemonSetName, namespace)

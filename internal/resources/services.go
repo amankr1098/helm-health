@@ -1,7 +1,6 @@
 package resources
 
 import (
-	"context"
 	"fmt"
 	"os"
 
@@ -12,7 +11,9 @@ import (
 )
 
 func FetchServices(clientset *kubernetes.Clientset, namespace string, serviceName string) output.Resource {
-	service, err := clientset.CoreV1().Services(namespace).Get(context.TODO(), serviceName, v1.GetOptions{})
+	ctx, cancel := RequestContext()
+	defer cancel()
+	service, err := clientset.CoreV1().Services(namespace).Get(ctx, serviceName, v1.GetOptions{})
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "failed to fetch Service %q in namespace %q: %v\n", serviceName, namespace, err)
 		r := output.NewResource("Service", serviceName, namespace)
@@ -21,7 +22,7 @@ func FetchServices(clientset *kubernetes.Clientset, namespace string, serviceNam
 		return *r
 	}
 
-	endpoint, err := clientset.CoreV1().Endpoints(namespace).Get(context.TODO(), serviceName, v1.GetOptions{})
+	endpoint, err := clientset.CoreV1().Endpoints(namespace).Get(ctx, serviceName, v1.GetOptions{})
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "failed to fetch Endpoints for Service %q in namespace %q: %v\n", serviceName, namespace, err)
 		r := output.NewResource("Service", serviceName, namespace)

@@ -1,7 +1,6 @@
 package resources
 
 import (
-	"context"
 	"fmt"
 	"os"
 
@@ -11,7 +10,9 @@ import (
 )
 
 func FetchJob(clientset *kubernetes.Clientset, namespace string, jobName string) output.Resource {
-	job, err := clientset.BatchV1().Jobs(namespace).Get(context.TODO(), jobName, v1.GetOptions{})
+	ctx, cancel := RequestContext()
+	defer cancel()
+	job, err := clientset.BatchV1().Jobs(namespace).Get(ctx, jobName, v1.GetOptions{})
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "failed to fetch Job %q in namespace %q: %v\n", jobName, namespace, err)
 		r := output.NewResource("Job", jobName, namespace)
