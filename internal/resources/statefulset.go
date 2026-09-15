@@ -1,7 +1,6 @@
 package resources
 
 import (
-	"context"
 	"fmt"
 	"os"
 
@@ -11,7 +10,9 @@ import (
 )
 
 func FetchStatefulSet(clientset *kubernetes.Clientset, namespace string, statefulSetName string) output.Resource {
-	statefulSet, err := clientset.AppsV1().StatefulSets(namespace).Get(context.TODO(), statefulSetName, v1.GetOptions{})
+	ctx, cancel := RequestContext()
+	defer cancel()
+	statefulSet, err := clientset.AppsV1().StatefulSets(namespace).Get(ctx, statefulSetName, v1.GetOptions{})
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "failed to fetch StatefulSet %q in namespace %q: %v\n", statefulSetName, namespace, err)
 		r := output.NewResource("StatefulSet", statefulSetName, namespace)

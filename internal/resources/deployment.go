@@ -14,7 +14,9 @@ import (
 )
 
 func FetchDeployment(clientset *kubernetes.Clientset, namespace string, deploymentName string) output.Resource {
-	deployment, err := clientset.AppsV1().Deployments(namespace).Get(context.TODO(), deploymentName, v1.GetOptions{})
+	ctx, cancel := RequestContext()
+	defer cancel()
+	deployment, err := clientset.AppsV1().Deployments(namespace).Get(ctx, deploymentName, v1.GetOptions{})
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "failed to fetch Deployment %q in namespace %q: %v\n", deploymentName, namespace, err)
 		r := output.NewResource("Deployment", deploymentName, namespace)
@@ -22,10 +24,10 @@ func FetchDeployment(clientset *kubernetes.Clientset, namespace string, deployme
 		r.AddIssue(fmt.Sprintf("- failed to fetch: %v", err))
 		return *r
 	}
-	return parseDeployment(clientset, deployment)
+	return parseDeployment(ctx, clientset, deployment)
 }
 
-func parseDeployment(clientset *kubernetes.Clientset, deployment *appsv1.Deployment) output.Resource {
+func parseDeployment(ctx context.Context, clientset *kubernetes.Clientset, deployment *appsv1.Deployment) output.Resource {
 	r := output.NewResource("Deployment", deployment.Name, deployment.Namespace)
 
 	desired := int32(0)
@@ -71,7 +73,7 @@ func parseDeployment(clientset *kubernetes.Clientset, deployment *appsv1.Deploym
 		r.AddIssue(fmt.Sprintf("- %d/%d replicas available", available, desired))
 
 		// Fetch pods for detailed diagnostics
-		pods := fetchDeploymentPods(clientset, deployment)
+		pods := fetchDeploymentPods(ctx, clientset, deployment)
 		podDetails := []map[string]any{}
 		for i := range pods {
 			pod := &pods[i]
@@ -89,13 +91,13 @@ func parseDeployment(clientset *kubernetes.Clientset, deployment *appsv1.Deploym
 	return *r
 }
 
-func fetchDeploymentPods(clientset *kubernetes.Clientset, deployment *appsv1.Deployment) []corev1.Pod {
+func fetchDeploymentPods(ctx context.Context, clientset *kubernetes.Clientset, deployment *appsv1.Deployment) []corev1.Pod {
 	selector := deployment.Spec.Selector
 	if selector == nil {
 		return nil
 	}
 	labelSelector := v1.FormatLabelSelector(selector)
-	pods, err := clientset.CoreV1().Pods(deployment.Namespace).List(context.TODO(), v1.ListOptions{
+	pods, err := clientset.CoreV1().Pods(deployment.Namespace).List(ctx, v1.ListOptions{
 		LabelSelector: labelSelector,
 	})
 	if err != nil {

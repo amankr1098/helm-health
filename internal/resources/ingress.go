@@ -12,7 +12,9 @@ import (
 )
 
 func FetchIngress(clientset *kubernetes.Clientset, namespace string, ingressName string) output.Resource {
-	ingress, err := clientset.NetworkingV1().Ingresses(namespace).Get(context.TODO(), ingressName, v1.GetOptions{})
+	ctx, cancel := RequestContext()
+	defer cancel()
+	ingress, err := clientset.NetworkingV1().Ingresses(namespace).Get(ctx, ingressName, v1.GetOptions{})
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "failed to fetch Ingress %q in namespace %q: %v\n", ingressName, namespace, err)
 		r := output.NewResource("Ingress", ingressName, namespace)
@@ -21,10 +23,10 @@ func FetchIngress(clientset *kubernetes.Clientset, namespace string, ingressName
 		return *r
 	}
 
-	return parseIngress(clientset, ingress)
+	return parseIngress(ctx, clientset, ingress)
 }
 
-func parseIngress(clientset *kubernetes.Clientset, ingress *networkingv1.Ingress) output.Resource {
+func parseIngress(ctx context.Context, clientset *kubernetes.Clientset, ingress *networkingv1.Ingress) output.Resource {
 	r := output.NewResource("Ingress", ingress.Name, ingress.Namespace)
 
 	healthy := true
@@ -84,7 +86,7 @@ func parseIngress(clientset *kubernetes.Clientset, ingress *networkingv1.Ingress
 				backend["service"] = svcName
 
 				// Check if backend service has ready endpoints
-				endpoints, err := clientset.CoreV1().Endpoints(ingress.Namespace).Get(context.TODO(), svcName, v1.GetOptions{})
+				endpoints, err := clientset.CoreV1().Endpoints(ingress.Namespace).Get(ctx, svcName, v1.GetOptions{})
 				if err != nil {
 					backend["status"] = "unknown"
 					backend["error"] = fmt.Sprintf("failed to fetch endpoints: %v", err)
@@ -119,7 +121,7 @@ func parseIngress(clientset *kubernetes.Clientset, ingress *networkingv1.Ingress
 			"service": svcName,
 			"default": true,
 		}
-		endpoints, err := clientset.CoreV1().Endpoints(ingress.Namespace).Get(context.TODO(), svcName, v1.GetOptions{})
+		endpoints, err := clientset.CoreV1().Endpoints(ingress.Namespace).Get(ctx, svcName, v1.GetOptions{})
 		if err != nil {
 			backend["status"] = "unknown"
 			healthy = false

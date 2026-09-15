@@ -2,6 +2,7 @@ package rel
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"os"
 	"time"
@@ -12,9 +13,15 @@ import (
 	"helm.sh/helm/v4/pkg/action"
 	"helm.sh/helm/v4/pkg/cli"
 	"helm.sh/helm/v4/pkg/release"
+	"helm.sh/helm/v4/pkg/storage/driver"
 )
 
-func FetchHelmRelease(releaseName string, namespace string, format output.OutputFormat) {
+// FetchHelmRelease computes the health of a Helm release. It returns a populated
+// OutputResult (never nil) alongside an error. Infrastructure failures (Helm init,
+// cluster connectivity) are returned as errors; a missing or uninstalled release is
+// reported via a StatusNotFound result with a nil error, so callers such as an HTTP
+// server can respond gracefully instead of terminating the process.
+func FetchHelmRelease(releaseName string, namespace string) (*output.OutputResult, error) {
 	startTime := time.Now()
 	result := output.NewOutputResult(releaseName, namespace)
 
@@ -22,49 +29,106 @@ func FetchHelmRelease(releaseName string, namespace string, format output.Output
 	actionConfig := new(action.Configuration)
 
 	if err := actionConfig.Init(settings.RESTClientGetter(), namespace, os.Getenv("HELM_DRIVER")); err != nil {
-		fmt.Fprintf(os.Stderr, "Error initializing Helm: %v\n", err)
-		os.Exit(1)
+		return nil, fmt.Errorf("initializing Helm: %w", err)
 	}
 
 	releaseGet := action.NewGet(actionConfig)
 	rel, err := releaseGet.Run(releaseName)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error fetching release: %v\n", err)
-		os.Exit(1)
+		if errors.Is(err, driver.ErrReleaseNotFound) {
+			result.Status = output.StatusNotFound
+			result.Message = "release not found — it may have been uninstalled"
+			result.Finalize(startTime)
+			return result, nil
+		}
+		return nil, fmt.Errorf("fetching release %q: %w", releaseName, err)
 	}
 
 	if rel == nil {
-		fmt.Fprintf(os.Stderr, "Release %q not found\n", releaseName)
-		os.Exit(1)
+		result.Status = output.StatusNotFound
+		result.Message = "release not found — it may have been uninstalled"
+		result.Finalize(startTime)
+		return result, nil
 	}
 
 	releaseResult, err := release.NewAccessor(rel)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error reading release: %v\n", err)
-		os.Exit(1)
+		return nil, fmt.Errorf("reading release %q: %w", releaseName, err)
 	}
 
-	if releaseResult.Status() != "deployed" {
-		result.Status = output.StatusUnhealthy
+	if status := releaseResult.Status(); status != "deployed" {
+		if status == "uninstalled" {
+			result.Status = output.StatusNotFound
+			result.Message = "release has been uninstalled"
+		} else {
+			result.Status = output.StatusUnhealthy
+			result.Message = fmt.Sprintf("release status is %q (expected \"deployed\")", status)
+		}
 		result.Finalize(startTime)
-		result.Print(format)
-		os.Exit(1)
+		return result, nil
 	}
 
-	resources := processManifest(releaseResult.Manifest(), namespace)
+	resources, err := processManifest(releaseResult.Manifest(), namespace)
+	if err != nil {
+		return nil, fmt.Errorf("checking resources for release %q: %w", releaseName, err)
+	}
 	for _, r := range resources {
 		result.AddResource(r)
 	}
 
 	result.Finalize(startTime)
-	result.Print(format)
-
-	if result.Status == output.StatusUnhealthy {
-		os.Exit(1)
-	}
+	return result, nil
 }
 
-func processManifest(manifest string, namespace string) []output.Resource {
+// ReleaseInfo is a lightweight summary of a Helm release for listing.
+type ReleaseInfo struct {
+	Name      string `json:"name"`
+	Namespace string `json:"namespace"`
+	Status    string `json:"status"`
+	Revision  int    `json:"revision"`
+	Updated   string `json:"updated,omitempty"`
+}
+
+// ListReleases returns Helm releases across all statuses. If namespace is empty,
+// releases from every namespace are returned.
+func ListReleases(namespace string) ([]ReleaseInfo, error) {
+	settings := cli.New()
+	actionConfig := new(action.Configuration)
+	if err := actionConfig.Init(settings.RESTClientGetter(), namespace, os.Getenv("HELM_DRIVER")); err != nil {
+		return nil, fmt.Errorf("initializing Helm: %w", err)
+	}
+
+	list := action.NewList(actionConfig)
+	list.All = true
+	list.AllNamespaces = namespace == ""
+	list.SetStateMask()
+
+	releases, err := list.Run()
+	if err != nil {
+		return nil, fmt.Errorf("listing releases: %w", err)
+	}
+
+	infos := make([]ReleaseInfo, 0, len(releases))
+	for _, rel := range releases {
+		acc, err := release.NewAccessor(rel)
+		if err != nil {
+			continue
+		}
+		info := ReleaseInfo{
+			Name:      acc.Name(),
+			Namespace: acc.Namespace(),
+			Status:    acc.Status(),
+			Revision:  acc.Version(),
+		}
+		if t := acc.DeployedAt(); !t.IsZero() {
+			info.Updated = t.UTC().Format(time.RFC3339)
+		}
+		infos = append(infos, info)
+	}
+	return infos, nil
+}
+
+func processManifest(manifest string, namespace string) ([]output.Resource, error) {
 	type metaData struct {
 		Name string
 	}
@@ -82,7 +146,10 @@ func processManifest(manifest string, namespace string) []output.Resource {
 		resourceMap[r.Kind] = append(resourceMap[r.Kind], r.Metadata.Name)
 	}
 
-	clientset := res.GetClientset("")
+	clientset, err := res.GetClientset("")
+	if err != nil {
+		return nil, err
+	}
 
 	var results []output.Resource
 
@@ -116,5 +183,5 @@ func processManifest(manifest string, namespace string) []output.Resource {
 		}
 	}
 
-	return results
+	return results, nil
 }
